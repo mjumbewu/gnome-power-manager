@@ -56,6 +56,8 @@ static GtkWidget *graph_history = NULL;
 static GtkWidget *graph_statistics = NULL;
 static UpClient *client = NULL;
 static GPtrArray *devices = NULL;
+static GDateTime *history_custom_start = NULL;
+static GDateTime *history_custom_end = NULL;
 
 enum {
 	GPM_INFO_COLUMN_TEXT,
@@ -85,18 +87,21 @@ enum {
 #define GPM_HISTORY_HOURS_TEXT			_("8 hours")
 #define GPM_HISTORY_DAY_TEXT			_("1 day")
 #define GPM_HISTORY_WEEK_TEXT			_("1 week")
+#define GPM_HISTORY_CUSTOM_TEXT			_("Custom...")
 
 #define GPM_HISTORY_MINUTE_VALUE		30*60
 #define GPM_HISTORY_HOUR_VALUE			3*60*60
 #define GPM_HISTORY_HOURS_VALUE			8*60*60
 #define GPM_HISTORY_DAY_VALUE			24*60*60
 #define GPM_HISTORY_WEEK_VALUE			7*24*60*60
+#define GPM_HISTORY_CUSTOM_VALUE		0
 
 #define GPM_HISTORY_MINUTE_DIVS			6  /* 5 min tick */
 #define GPM_HISTORY_HOUR_DIVS			6  /* 30 min tick */
 #define GPM_HISTORY_HOURS_DIVS			8  /* 1 hr tick */
 #define GPM_HISTORY_DAY_DIVS			12 /* 2 hr tick */
 #define GPM_HISTORY_WEEK_DIVS			7  /* 1 day tick */
+#define GPM_HISTORY_CUSTOM_DIVS			10 /* arbitrary tick */
 
 /* TRANSLATORS: what we've observed about the device */
 #define GPM_STATS_CHARGE_DATA_TEXT		_("Charge profile")
@@ -729,6 +734,26 @@ gpm_stats_update_info_page_history (UpDevice *device)
 	EggGraphPoint *point;
 	GPtrArray *new;
 	gint64 offset = 0;
+	gdouble start_x, stop_x;
+	guint fetch_timespan;
+
+	if (history_time == GPM_HISTORY_CUSTOM_VALUE && history_custom_start && history_custom_end) {
+		GDateTime *now = g_date_time_new_now_local ();
+		gint64 now_ts = g_date_time_to_unix (now);
+		gint64 start_ts = g_date_time_to_unix (history_custom_start);
+		gint64 end_ts = g_date_time_to_unix (history_custom_end);
+		g_date_time_unref (now);
+
+		fetch_timespan = (guint) (now_ts - start_ts);
+		start_x = (gdouble) (start_ts - now_ts);
+		stop_x = (gdouble) (end_ts - now_ts);
+		if (stop_x > 0)
+			stop_x = 0.0f;
+	} else {
+		fetch_timespan = history_time;
+		start_x = -(gdouble) history_time;
+		stop_x = 0.0f;
+	}
 
 	new = g_ptr_array_new_with_free_func ((GDestroyNotify) egg_graph_point_free);
 	if (g_strcmp0 (history_type, GPM_HISTORY_CHARGE_VALUE) == 0) {
@@ -737,8 +762,8 @@ gpm_stats_update_info_page_history (UpDevice *device)
 			      "type-y", EGG_GRAPH_WIDGET_KIND_PERCENTAGE,
 			      "autorange-x", FALSE,
 			      "divs-x", (guint) divs_x,
-			      "start-x", -(gdouble) history_time,
-			      "stop-x", (gdouble) 0.f,
+			      "start-x", start_x,
+			      "stop-x", stop_x,
 			      "autorange-y", FALSE,
 			      "start-y", (gdouble) 0.f,
 			      "stop-y", (gdouble) 100.f,
@@ -749,8 +774,8 @@ gpm_stats_update_info_page_history (UpDevice *device)
 			      "type-y", EGG_GRAPH_WIDGET_KIND_POWER,
 			      "autorange-x", FALSE,
 			      "divs-x", (guint) divs_x,
-			      "start-x", -(gdouble) history_time,
-			      "stop-x", (gdouble) 0.f,
+			      "start-x", start_x,
+			      "stop-x", stop_x,
 			      "autorange-y", TRUE,
 			      NULL);
 	} else {
@@ -759,14 +784,14 @@ gpm_stats_update_info_page_history (UpDevice *device)
 			      "type-y", EGG_GRAPH_WIDGET_KIND_TIME,
 			      "autorange-x", FALSE,
 			      "divs-x", (guint) divs_x,
-			      "start-x", -(gdouble) history_time,
-			      "stop-x", (gdouble) 0.f,
+			      "start-x", start_x,
+			      "stop-x", stop_x,
 			      "autorange-y", TRUE,
 			      NULL);
 	}
 
 	widget = GTK_WIDGET (gtk_builder_get_object (builder, "label_history_nodata"));
-	array = up_device_get_history_sync (device, history_type, history_time, 150, NULL, NULL);
+	array = up_device_get_history_sync (device, history_type, fetch_timespan, 150, NULL, NULL);
 	if (array == NULL) {
 		/* show no data label and hide graph */
 		gtk_widget_hide (graph_history);
@@ -1225,6 +1250,193 @@ gpm_stats_type_combo_changed_cb (GtkWidget *widget, gpointer data)
 }
 
 static void
+gpm_stats_custom_dialog_response_cb (GtkDialog *dialog, gint response_id, gpointer user_data)
+{
+	GtkWidget *combo = GTK_WIDGET (user_data);
+	GtkWidget *cal_start, *cal_end;
+	GtkWidget *spin_start_h, *spin_start_m;
+	GtkWidget *spin_end_h, *spin_end_m;
+	GDateTime *dt_start, *dt_end;
+	GDateTime *dt_start_full, *dt_end_full;
+	gint h, m;
+
+	if (response_id == GTK_RESPONSE_ACCEPT) {
+		cal_start = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "cal_start"));
+		cal_end = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "cal_end"));
+		spin_start_h = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "spin_start_h"));
+		spin_start_m = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "spin_start_m"));
+		spin_end_h = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "spin_end_h"));
+		spin_end_m = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "spin_end_m"));
+
+		dt_start = gtk_calendar_get_date (GTK_CALENDAR (cal_start));
+		dt_end = gtk_calendar_get_date (GTK_CALENDAR (cal_end));
+
+		h = gtk_spin_button_get_value_as_int (GTK_SPIN_BUTTON (spin_start_h));
+		m = gtk_spin_button_get_value_as_int (GTK_SPIN_BUTTON (spin_start_m));
+		dt_start_full = g_date_time_new_local (g_date_time_get_year (dt_start),
+						       g_date_time_get_month (dt_start),
+						       g_date_time_get_day_of_month (dt_start),
+						       h, m, 0);
+
+		h = gtk_spin_button_get_value_as_int (GTK_SPIN_BUTTON (spin_end_h));
+		m = gtk_spin_button_get_value_as_int (GTK_SPIN_BUTTON (spin_end_m));
+		dt_end_full = g_date_time_new_local (g_date_time_get_year (dt_end),
+						     g_date_time_get_month (dt_end),
+						     g_date_time_get_day_of_month (dt_end),
+						     h, m, 59);
+
+		if (history_custom_start)
+			g_date_time_unref (history_custom_start);
+		if (history_custom_end)
+			g_date_time_unref (history_custom_end);
+
+		history_custom_start = dt_start_full;
+		history_custom_end = dt_end_full;
+
+		g_date_time_unref (dt_start);
+		g_date_time_unref (dt_end);
+
+		history_time = GPM_HISTORY_CUSTOM_VALUE;
+		divs_x = GPM_HISTORY_CUSTOM_DIVS;
+
+		gpm_stats_button_update_ui ();
+	} else {
+		/* Revert combo box */
+		if (history_time == GPM_HISTORY_MINUTE_VALUE) {
+			gtk_combo_box_set_active (GTK_COMBO_BOX (combo), 0);
+		} else if (history_time == GPM_HISTORY_HOUR_VALUE) {
+			gtk_combo_box_set_active (GTK_COMBO_BOX (combo), 1);
+		} else if (history_time == GPM_HISTORY_HOURS_VALUE) {
+			gtk_combo_box_set_active (GTK_COMBO_BOX (combo), 2);
+		} else if (history_time == GPM_HISTORY_DAY_VALUE) {
+			gtk_combo_box_set_active (GTK_COMBO_BOX (combo), 3);
+		} else if (history_time == GPM_HISTORY_WEEK_VALUE) {
+			gtk_combo_box_set_active (GTK_COMBO_BOX (combo), 4);
+		} else if (history_time == GPM_HISTORY_CUSTOM_VALUE) {
+			gtk_combo_box_set_active (GTK_COMBO_BOX (combo), 5);
+		}
+	}
+	gtk_window_destroy (GTK_WINDOW (dialog));
+}
+
+static gboolean
+gpm_stats_spin_output_cb (GtkSpinButton *spin, gpointer data)
+{
+	GtkAdjustment *adjustment;
+	g_autofree gchar *text = NULL;
+	gint value;
+
+	/* Make sure hour/minute always shows two digits */
+	adjustment = gtk_spin_button_get_adjustment (spin);
+	value = (gint) gtk_adjustment_get_value (adjustment);
+	text = g_strdup_printf ("%02d", value);
+	gtk_editable_set_text (GTK_EDITABLE (spin), text);
+
+	return TRUE;
+}
+
+static void
+gpm_stats_show_custom_dialog (GtkWidget *parent_combo)
+{
+	GtkWidget *dialog;
+	GtkWidget *content_area;
+	GtkWidget *grid;
+	GtkWidget *cal_start, *cal_end;
+	GtkWidget *spin_start_h, *spin_start_m;
+	GtkWidget *spin_end_h, *spin_end_m;
+	GtkWidget *label;
+	GtkWindow *parent_window;
+	GtkAdjustment *adj_h, *adj_m;
+
+	parent_window = GTK_WINDOW (gtk_widget_get_native (parent_combo));
+
+	dialog = gtk_dialog_new_with_buttons (_("Select Custom Range"),
+					      parent_window,
+					      GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+					      _("_Cancel"),
+					      GTK_RESPONSE_CANCEL,
+					      _("_OK"),
+					      GTK_RESPONSE_ACCEPT,
+					      NULL);
+
+	content_area = gtk_dialog_get_content_area (GTK_DIALOG (dialog));
+	grid = gtk_grid_new ();
+	gtk_grid_set_column_spacing (GTK_GRID (grid), 12);
+	gtk_grid_set_row_spacing (GTK_GRID (grid), 6);
+	gtk_widget_set_margin_start (grid, 12);
+	gtk_widget_set_margin_end (grid, 12);
+	gtk_widget_set_margin_top (grid, 12);
+	gtk_widget_set_margin_bottom (grid, 12);
+
+	/* Start Date/Time */
+	label = gtk_label_new (_("Start Date:"));
+	gtk_grid_attach (GTK_GRID (grid), label, 0, 0, 3, 1);
+	cal_start = gtk_calendar_new ();
+	gtk_grid_attach (GTK_GRID (grid), cal_start, 0, 1, 3, 1);
+
+	adj_h = gtk_adjustment_new (0, 0, 23, 1, 10, 0);
+	spin_start_h = gtk_spin_button_new (adj_h, 1, 0);
+	gtk_orientable_set_orientation (GTK_ORIENTABLE (spin_start_h), GTK_ORIENTATION_VERTICAL);
+	g_signal_connect (spin_start_h, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
+	gtk_grid_attach (GTK_GRID (grid), spin_start_h, 0, 2, 1, 1);
+
+	label = gtk_label_new (":");
+	gtk_grid_attach (GTK_GRID (grid), label, 1, 2, 1, 1);
+
+	adj_m = gtk_adjustment_new (0, 0, 59, 1, 10, 0);
+	spin_start_m = gtk_spin_button_new (adj_m, 1, 0);
+	gtk_orientable_set_orientation (GTK_ORIENTABLE (spin_start_m), GTK_ORIENTATION_VERTICAL);
+	g_signal_connect (spin_start_m, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
+	gtk_grid_attach (GTK_GRID (grid), spin_start_m, 2, 2, 1, 1);
+
+	/* End Date/Time */
+	label = gtk_label_new (_("End Date:"));
+	gtk_grid_attach (GTK_GRID (grid), label, 3, 0, 3, 1);
+	cal_end = gtk_calendar_new ();
+	gtk_grid_attach (GTK_GRID (grid), cal_end, 3, 1, 3, 1);
+
+	adj_h = gtk_adjustment_new (23, 0, 23, 1, 10, 0);
+	spin_end_h = gtk_spin_button_new (adj_h, 1, 0);
+	gtk_orientable_set_orientation (GTK_ORIENTABLE (spin_end_h), GTK_ORIENTATION_VERTICAL);
+	g_signal_connect (spin_end_h, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
+	gtk_grid_attach (GTK_GRID (grid), spin_end_h, 3, 2, 1, 1);
+
+	label = gtk_label_new (":");
+	gtk_grid_attach (GTK_GRID (grid), label, 4, 2, 1, 1);
+
+	adj_m = gtk_adjustment_new (59, 0, 59, 1, 10, 0);
+	spin_end_m = gtk_spin_button_new (adj_m, 1, 0);
+	gtk_orientable_set_orientation (GTK_ORIENTABLE (spin_end_m), GTK_ORIENTATION_VERTICAL);
+	g_signal_connect (spin_end_m, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
+	gtk_grid_attach (GTK_GRID (grid), spin_end_m, 5, 2, 1, 1);
+
+	if (history_custom_start) {
+		gtk_calendar_select_day (GTK_CALENDAR (cal_start), history_custom_start);
+		gtk_spin_button_set_value (GTK_SPIN_BUTTON (spin_start_h), g_date_time_get_hour (history_custom_start));
+		gtk_spin_button_set_value (GTK_SPIN_BUTTON (spin_start_m), g_date_time_get_minute (history_custom_start));
+	}
+	if (history_custom_end) {
+		gtk_calendar_select_day (GTK_CALENDAR (cal_end), history_custom_end);
+		gtk_spin_button_set_value (GTK_SPIN_BUTTON (spin_end_h), g_date_time_get_hour (history_custom_end));
+		gtk_spin_button_set_value (GTK_SPIN_BUTTON (spin_end_m), g_date_time_get_minute (history_custom_end));
+	}
+
+	gtk_box_append (GTK_BOX (content_area), grid);
+	gtk_widget_show (grid);
+
+	g_object_set_data (G_OBJECT (dialog), "cal_start", cal_start);
+	g_object_set_data (G_OBJECT (dialog), "cal_end", cal_end);
+	g_object_set_data (G_OBJECT (dialog), "spin_start_h", spin_start_h);
+	g_object_set_data (G_OBJECT (dialog), "spin_start_m", spin_start_m);
+	g_object_set_data (G_OBJECT (dialog), "spin_end_h", spin_end_h);
+	g_object_set_data (G_OBJECT (dialog), "spin_end_m", spin_end_m);
+
+	g_signal_connect (dialog, "response", G_CALLBACK (gpm_stats_custom_dialog_response_cb), parent_combo);
+
+	gtk_widget_show (dialog);
+}
+
+static void
 gpm_stats_range_combo_changed (GtkWidget *widget, gpointer data)
 {
 	g_autofree gchar *value = NULL;
@@ -1244,6 +1456,9 @@ gpm_stats_range_combo_changed (GtkWidget *widget, gpointer data)
 	} else if (g_strcmp0 (value, GPM_HISTORY_WEEK_TEXT) == 0) {
 		history_time = GPM_HISTORY_WEEK_VALUE;
 		divs_x = GPM_HISTORY_WEEK_DIVS;
+	} else if (g_strcmp0 (value, GPM_HISTORY_CUSTOM_TEXT) == 0) {
+		gpm_stats_show_custom_dialog (widget);
+		return;
 	} else
 		g_assert (FALSE);
 
@@ -1511,6 +1726,7 @@ gpm_stats_activate_cb (GApplication *application,
 	gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (widget), GPM_HISTORY_HOURS_TEXT);
 	gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (widget), GPM_HISTORY_DAY_TEXT);
 	gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (widget), GPM_HISTORY_WEEK_TEXT);
+	gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (widget), GPM_HISTORY_CUSTOM_TEXT);
 
 	if (history_time == GPM_HISTORY_MINUTE_VALUE) {
 		gtk_combo_box_set_active (GTK_COMBO_BOX (widget), 0);
@@ -1519,7 +1735,7 @@ gpm_stats_activate_cb (GApplication *application,
 		gtk_combo_box_set_active (GTK_COMBO_BOX (widget), 1);
 		divs_x = GPM_HISTORY_HOUR_DIVS;
 	} else if (history_time == GPM_HISTORY_DAY_VALUE) {
-		gtk_combo_box_set_active (GTK_COMBO_BOX (widget), 3); 
+		gtk_combo_box_set_active (GTK_COMBO_BOX (widget), 3);
 		divs_x = GPM_HISTORY_DAY_DIVS;
 	} else if (history_time == GPM_HISTORY_WEEK_VALUE) {
 		gtk_combo_box_set_active (GTK_COMBO_BOX (widget), 4);
