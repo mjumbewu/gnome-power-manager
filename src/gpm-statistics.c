@@ -1261,12 +1261,12 @@ gpm_stats_custom_dialog_response_cb (GtkDialog *dialog, gint response_id, gpoint
 	gint h, m;
 
 	if (response_id == GTK_RESPONSE_ACCEPT) {
-		cal_start = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "cal_start"));
-		cal_end = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "cal_end"));
-		spin_start_h = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "spin_start_h"));
-		spin_start_m = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "spin_start_m"));
-		spin_end_h = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "spin_end_h"));
-		spin_end_m = GTK_WIDGET (g_object_get_data (G_OBJECT (dialog), "spin_end_m"));
+		cal_start = GTK_WIDGET (gtk_builder_get_object (builder, "cal_start"));
+		cal_end = GTK_WIDGET (gtk_builder_get_object (builder, "cal_end"));
+		spin_start_h = GTK_WIDGET (gtk_builder_get_object (builder, "spin_start_h"));
+		spin_start_m = GTK_WIDGET (gtk_builder_get_object (builder, "spin_start_m"));
+		spin_end_h = GTK_WIDGET (gtk_builder_get_object (builder, "spin_end_h"));
+		spin_end_m = GTK_WIDGET (gtk_builder_get_object (builder, "spin_end_m"));
 
 		dt_start = gtk_calendar_get_date (GTK_CALENDAR (cal_start));
 		dt_end = gtk_calendar_get_date (GTK_CALENDAR (cal_end));
@@ -1316,7 +1316,7 @@ gpm_stats_custom_dialog_response_cb (GtkDialog *dialog, gint response_id, gpoint
 			gtk_combo_box_set_active (GTK_COMBO_BOX (combo), 5);
 		}
 	}
-	gtk_window_destroy (GTK_WINDOW (dialog));
+	gtk_widget_hide (GTK_WIDGET (dialog));
 }
 
 static gboolean
@@ -1339,76 +1339,17 @@ static void
 gpm_stats_show_custom_dialog (GtkWidget *parent_combo)
 {
 	GtkWidget *dialog;
-	GtkWidget *content_area;
-	GtkWidget *grid;
 	GtkWidget *cal_start, *cal_end;
 	GtkWidget *spin_start_h, *spin_start_m;
 	GtkWidget *spin_end_h, *spin_end_m;
-	GtkWidget *label;
-	GtkWindow *parent_window;
-	GtkAdjustment *adj_h, *adj_m;
 
-	parent_window = GTK_WINDOW (gtk_widget_get_native (parent_combo));
-
-	dialog = gtk_dialog_new_with_buttons (_("Select Custom Range"),
-					      parent_window,
-					      GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
-					      _("_Cancel"),
-					      GTK_RESPONSE_CANCEL,
-					      _("_OK"),
-					      GTK_RESPONSE_ACCEPT,
-					      NULL);
-
-	content_area = gtk_dialog_get_content_area (GTK_DIALOG (dialog));
-	grid = gtk_grid_new ();
-	gtk_grid_set_column_spacing (GTK_GRID (grid), 12);
-	gtk_grid_set_row_spacing (GTK_GRID (grid), 6);
-	gtk_widget_set_margin_start (grid, 12);
-	gtk_widget_set_margin_end (grid, 12);
-	gtk_widget_set_margin_top (grid, 12);
-	gtk_widget_set_margin_bottom (grid, 12);
-
-	/* Start Date/Time */
-	label = gtk_label_new (_("Start Date:"));
-	gtk_grid_attach (GTK_GRID (grid), label, 0, 0, 3, 1);
-	cal_start = gtk_calendar_new ();
-	gtk_grid_attach (GTK_GRID (grid), cal_start, 0, 1, 3, 1);
-
-	adj_h = gtk_adjustment_new (0, 0, 23, 1, 10, 0);
-	spin_start_h = gtk_spin_button_new (adj_h, 1, 0);
-	gtk_orientable_set_orientation (GTK_ORIENTABLE (spin_start_h), GTK_ORIENTATION_VERTICAL);
-	g_signal_connect (spin_start_h, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
-	gtk_grid_attach (GTK_GRID (grid), spin_start_h, 0, 2, 1, 1);
-
-	label = gtk_label_new (":");
-	gtk_grid_attach (GTK_GRID (grid), label, 1, 2, 1, 1);
-
-	adj_m = gtk_adjustment_new (0, 0, 59, 1, 10, 0);
-	spin_start_m = gtk_spin_button_new (adj_m, 1, 0);
-	gtk_orientable_set_orientation (GTK_ORIENTABLE (spin_start_m), GTK_ORIENTATION_VERTICAL);
-	g_signal_connect (spin_start_m, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
-	gtk_grid_attach (GTK_GRID (grid), spin_start_m, 2, 2, 1, 1);
-
-	/* End Date/Time */
-	label = gtk_label_new (_("End Date:"));
-	gtk_grid_attach (GTK_GRID (grid), label, 3, 0, 3, 1);
-	cal_end = gtk_calendar_new ();
-	gtk_grid_attach (GTK_GRID (grid), cal_end, 3, 1, 3, 1);
-
-	adj_h = gtk_adjustment_new (23, 0, 23, 1, 10, 0);
-	spin_end_h = gtk_spin_button_new (adj_h, 1, 0);
-	gtk_orientable_set_orientation (GTK_ORIENTABLE (spin_end_h), GTK_ORIENTATION_VERTICAL);
-	g_signal_connect (spin_end_h, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
-	gtk_grid_attach (GTK_GRID (grid), spin_end_h, 3, 2, 1, 1);
-
-	label = gtk_label_new (":");
-	gtk_grid_attach (GTK_GRID (grid), label, 4, 2, 1, 1);
-
-	adj_m = gtk_adjustment_new (59, 0, 59, 1, 10, 0);
-	spin_end_m = gtk_spin_button_new (adj_m, 1, 0);
-	gtk_orientable_set_orientation (GTK_ORIENTABLE (spin_end_m), GTK_ORIENTATION_VERTICAL);
-	g_signal_connect (spin_end_m, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
-	gtk_grid_attach (GTK_GRID (grid), spin_end_m, 5, 2, 1, 1);
+	dialog = GTK_WIDGET (gtk_builder_get_object (builder, "dialog_custom_range"));
+	cal_start = GTK_WIDGET (gtk_builder_get_object (builder, "cal_start"));
+	cal_end = GTK_WIDGET (gtk_builder_get_object (builder, "cal_end"));
+	spin_start_h = GTK_WIDGET (gtk_builder_get_object (builder, "spin_start_h"));
+	spin_start_m = GTK_WIDGET (gtk_builder_get_object (builder, "spin_start_m"));
+	spin_end_h = GTK_WIDGET (gtk_builder_get_object (builder, "spin_end_h"));
+	spin_end_m = GTK_WIDGET (gtk_builder_get_object (builder, "spin_end_m"));
 
 	if (history_custom_start) {
 		gtk_calendar_select_day (GTK_CALENDAR (cal_start), history_custom_start);
@@ -1421,19 +1362,7 @@ gpm_stats_show_custom_dialog (GtkWidget *parent_combo)
 		gtk_spin_button_set_value (GTK_SPIN_BUTTON (spin_end_m), g_date_time_get_minute (history_custom_end));
 	}
 
-	gtk_box_append (GTK_BOX (content_area), grid);
-	gtk_widget_show (grid);
-
-	g_object_set_data (G_OBJECT (dialog), "cal_start", cal_start);
-	g_object_set_data (G_OBJECT (dialog), "cal_end", cal_end);
-	g_object_set_data (G_OBJECT (dialog), "spin_start_h", spin_start_h);
-	g_object_set_data (G_OBJECT (dialog), "spin_start_m", spin_start_m);
-	g_object_set_data (G_OBJECT (dialog), "spin_end_h", spin_end_h);
-	g_object_set_data (G_OBJECT (dialog), "spin_end_m", spin_end_m);
-
-	g_signal_connect (dialog, "response", G_CALLBACK (gpm_stats_custom_dialog_response_cb), parent_combo);
-
-	gtk_widget_show (dialog);
+	gtk_window_present (GTK_WINDOW (dialog));
 }
 
 static void
@@ -1776,6 +1705,21 @@ gpm_stats_activate_cb (GApplication *application,
 	gpm_stats_history_type_combo_changed_cb (widget, NULL);
 	widget = GTK_WIDGET (gtk_builder_get_object (builder, "combobox_stats_type"));
 	gpm_stats_type_combo_changed_cb (widget, NULL);
+
+	/* setup custom range dialog */
+	widget = GTK_WIDGET (gtk_builder_get_object (builder, "dialog_custom_range"));
+	gtk_window_set_transient_for (GTK_WINDOW (widget), window);
+	g_signal_connect (widget, "response", G_CALLBACK (gpm_stats_custom_dialog_response_cb),
+			  gtk_builder_get_object (builder, "combobox_history_time"));
+
+	widget = GTK_WIDGET (gtk_builder_get_object (builder, "spin_start_h"));
+	g_signal_connect (widget, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
+	widget = GTK_WIDGET (gtk_builder_get_object (builder, "spin_start_m"));
+	g_signal_connect (widget, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
+	widget = GTK_WIDGET (gtk_builder_get_object (builder, "spin_end_h"));
+	g_signal_connect (widget, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
+	widget = GTK_WIDGET (gtk_builder_get_object (builder, "spin_end_m"));
+	g_signal_connect (widget, "output", G_CALLBACK (gpm_stats_spin_output_cb), NULL);
 
 	widget = GTK_WIDGET (gtk_builder_get_object (builder, "dialog_stats"));
 	gtk_widget_show (widget);
